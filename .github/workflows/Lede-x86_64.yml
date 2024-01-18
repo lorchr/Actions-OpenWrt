@@ -1,0 +1,441 @@
+#
+# Copyright (c) 2019-2020 P3TERX <https://p3terx.com>
+#
+# This is free software, licensed under the MIT License.
+# See /LICENSE for more information.
+#
+# https://github.com/P3TERX/Actions-OpenWrt
+# Description: Build OpenWrt using GitHub Actions
+#
+
+name: Build Lede For X86_64 Devices
+
+on:
+  repository_dispatch:
+  workflow_dispatch:
+    inputs:
+      ssh:
+        description: 'SSH connection to Actions'
+        required: false
+        default: 'false'
+#   schedule:
+#     - cron: 0 0 2 * *
+
+env:
+  REPO_URL: https://github.com/coolsnowwolf/lede
+  REPO_BRANCH: master
+  FEEDS_CONF: feeds.conf.default
+  CONFIG_FILE: Lede/x86_64/.config
+  DIY_P1_SH: Lede/x86_64/diy-part1.sh
+  DIY_P2_SH: Lede/x86_64/diy-part2.sh
+  UPLOAD_BIN_DIR: false
+  UPLOAD_FIRMWARE: true
+  UPLOAD_COWTRANSFER: false
+  UPLOAD_WETRANSFER: false
+  UPLOAD_RELEASE: true
+  TZ: Asia/Shanghai
+  TOOLCHAIN_TAG: Toolchain
+  FIRMWARE_TAG: X86_64
+
+jobs:
+  Toolchain:
+    runs-on: ubuntu-22.04
+
+    outputs:
+      OPENWRT_PATH: ${{ steps.clone.outputs.OPENWRT_PATH }}
+      VERSION_INFO: ${{ steps.clone.outputs.VERSION_INFO }}
+      COMMIT_HASH: ${{ steps.env.outputs.COMMIT_HASH }}
+      CURRENT_BRANCH: ${{ steps.env.outputs.CURRENT_BRANCH }}
+      SOURCE_REPO: ${{ steps.env.outputs.SOURCE_REPO }}
+      DEVICE_TARGET: ${{ steps.env.outputs.DEVICE_TARGET }}
+      DEVICE_SUBTARGET: ${{ steps.env.outputs.DEVICE_SUBTARGET }}
+      TOOLCHAIN_IMAGE: ${{ steps.env.outputs.TOOLCHAIN_IMAGE }}
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@main
+
+    - name: Initialization Environment
+      env:
+        DEBIAN_FRONTEND: noninteractive
+      run: |
+        docker rmi `docker images -q`
+        sudo rm -rf /etc/apt/sources.list.d/* /usr/share/dotnet /usr/local/lib/android /opt/ghc /etc/mysql /etc/php
+        sudo -E apt-get -y purge azure-cli* ghc* zulu* hhvm* llvm* firefox* google* dotnet* aspnetcore* powershell* openjdk* adoptopenjdk* mysql* php* mongodb* moby* snapd* snap* || true
+        sudo -E apt-get -qq update
+        sudo -E apt-get -qq install $(curl -fsSL git.io/depends-ubuntu-2204)
+        sudo -E apt-get -qq autoremove --purge
+        sudo -E apt-get -qq clean
+        sudo timedatectl set-timezone "$TZ"
+        sudo mkdir -p /workdir
+        sudo chown $USER:$GROUPS /workdir
+
+    - name: Clone Source Code
+      id: clone
+      working-directory: /workdir
+      run: |
+        df -hT $PWD
+        git clone $REPO_URL -b $REPO_BRANCH openwrt
+        cd openwrt
+        ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
+        echo "OPENWRT_PATH=$PWD" >> $GITHUB_ENV
+        echo "OPENWRT_PATH=$(echo $PWD)" >> $GITHUB_OUTPUT
+        export VERSION_INFO=$(git show -s --date=short --format="Author: %an<br/>Date: %cd<br/>Commit: %s<br/>Commit HASH: %H")
+        echo "VERSION_INFO=$VERSION_INFO" >> $GITHUB_ENV
+        echo "VERSION_INFO=$(echo $VERSION_INFO)" >> $GITHUB_OUTPUT
+        export COMMIT_HASH=$(git show -s --date=short --format="%H")
+        echo "COMMIT_HASH=$COMMIT_HASH" >> $GITHUB_ENV
+        echo "COMMIT_HASH=$(echo $COMMIT_HASH)" >> $GITHUB_OUTPUT
+    
+    - name: Setup Go version
+      uses: actions/setup-go@v4
+      with:
+        go-version: 'stable'
+
+    - name: Generate Toolchain Config
+      run: |
+        [ -e $CONFIG_FILE ] && mv $CONFIG_FILE $OPENWRT_PATH/.config
+        echo "CONFIG_ALL=y" >> $OPENWRT_PATH/.config
+        echo "CONFIG_ALL_NONSHARED=y" >> $OPENWRT_PATH/.config
+        cd $OPENWRT_PATH
+        make defconfig > /dev/null 2>&1
+
+    - name: Generate Variables
+      id: env
+      run: |
+        export CURRENT_BRANCH="$(git symbolic-ref --short HEAD)"
+        echo "CURRENT_BRANCH=$CURRENT_BRANCH" >> $GITHUB_ENV
+        echo "CURRENT_BRANCH=$(echo $CURRENT_BRANCH)" >> $GITHUB_OUTPUT
+        cd $OPENWRT_PATH
+        export SOURCE_REPO="$(echo $REPO_URL | awk -F '/' '{print $(NF)}')"
+        echo "SOURCE_REPO=$SOURCE_REPO" >> $GITHUB_ENV
+        echo "SOURCE_REPO=$(echo $SOURCE_REPO)" >> $GITHUB_OUTPUT
+        export DEVICE_TARGET=$(cat .config | grep CONFIG_TARGET_BOARD | awk -F '"' '{print $2}')
+        echo "DEVICE_TARGET=$DEVICE_TARGET" >> $GITHUB_ENV
+        echo "DEVICE_TARGET=$(echo $DEVICE_TARGET)" >> $GITHUB_OUTPUT
+        export DEVICE_SUBTARGET=$(cat .config | grep CONFIG_TARGET_SUBTARGET | awk -F '"' '{print $2}')
+        echo "DEVICE_SUBTARGET=$DEVICE_SUBTARGET" >> $GITHUB_ENV
+        echo "DEVICE_SUBTARGET=$(echo $DEVICE_SUBTARGET)" >> $GITHUB_OUTPUT
+        export TOOLCHAIN_IMAGE="toolchain-$SOURCE_REPO-$REPO_BRANCH-$DEVICE_TARGET-$DEVICE_SUBTARGET"
+        echo "TOOLCHAIN_IMAGE=$TOOLCHAIN_IMAGE" >> $GITHUB_ENV
+        echo "TOOLCHAIN_IMAGE=$(echo $TOOLCHAIN_IMAGE)" >> $GITHUB_OUTPUT
+
+    - name: Compare Toolchain Hash
+      id: hash
+      run: |
+        cd $OPENWRT_PATH
+        export CURRENT_HASH=$(git log --pretty=tformat:"%H" -n1 tools toolchain)
+        echo "CURRENT_HASH=$CURRENT_HASH" >> $GITHUB_ENV
+        echo "CURRENT_HASH is $CURRENT_HASH"
+        export CACHE_HASH=$(curl -fSsL https://github.com/$GITHUB_REPOSITORY/releases/download/$TOOLCHAIN_TAG/$TOOLCHAIN_IMAGE.hash)
+        echo "CACHE_HASH is $CACHE_HASH"
+        if [ -z "$CACHE_HASH" ] || [ "$CURRENT_HASH" != "$CACHE_HASH" ]; then
+          echo "REBUILD_TOOLCHAIN=true" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Install Feeds
+      if: steps.hash.outputs.REBUILD_TOOLCHAIN == 'true'
+      run: |
+        cd $OPENWRT_PATH
+        ./scripts/feeds update -a
+        ./scripts/feeds install -a
+
+    - name: Compile Tools
+      if: steps.hash.outputs.REBUILD_TOOLCHAIN == 'true'
+      run: |
+        cd $OPENWRT_PATH
+        make defconfig
+        echo -e "$(nproc) thread compile"
+        make tools/compile -j$(nproc) || make tools/compile -j1 V=s
+
+    - name: Compile Toolchain
+      if: steps.hash.outputs.REBUILD_TOOLCHAIN == 'true'
+      run: |
+        cd $OPENWRT_PATH
+        echo -e "$(nproc) thread compile"
+        make toolchain/compile -j$(nproc) || make toolchain/compile -j1 V=s
+        rm -rf .config* dl bin
+
+    - name: Generate Toolchain Image
+      if: steps.hash.outputs.REBUILD_TOOLCHAIN == 'true'
+      run: |
+        cd /workdir
+        mksquashfs openwrt $TOOLCHAIN_IMAGE -force-gid 1001 -force-uid 1001 -comp zstd
+        mkdir -p $GITHUB_WORKSPACE/output
+        split -d -b 1024M $TOOLCHAIN_IMAGE $GITHUB_WORKSPACE/output/$TOOLCHAIN_IMAGE.img.
+        rm $TOOLCHAIN_IMAGE
+        echo $CURRENT_HASH > $GITHUB_WORKSPACE/output/$TOOLCHAIN_IMAGE.hash
+        ls -lh $GITHUB_WORKSPACE/output
+
+    - name: Delete Old Toolchain Assets
+      if: steps.hash.outputs.REBUILD_TOOLCHAIN == 'true'
+      uses: mknejp/delete-release-assets@v1
+      with:
+        token: ${{ secrets.ACCESS_TOKEN }}
+        tag: ${{ env.TOOLCHAIN_TAG }}
+        assets: '${{ env.TOOLCHAIN_IMAGE }}.*'
+        fail-if-no-assets: false
+        fail-if-no-release: false
+
+    - name: Upload Toolchain Image
+      if: steps.hash.outputs.REBUILD_TOOLCHAIN == 'true'
+      uses: ncipollo/release-action@v1
+      with:
+        name: Toolchain-Image
+        allowUpdates: true
+        tag: ${{ env.TOOLCHAIN_TAG }}
+        token: ${{ secrets.ACCESS_TOKEN }}
+        artifacts: output/*
+        body: OpenWrt 工具链镜像文件
+
+  Build:
+    needs: [Toolchain]
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360 # 防止编译终止
+
+    env:
+      OPENWRT_PATH: ${{ needs.Toolchain.outputs.OPENWRT_PATH }}
+      VERSION_INFO: ${{ needs.Toolchain.outputs.VERSION_INFO }}
+      COMMIT_HASH: ${{ needs.Toolchain.outputs.COMMIT_HASH }}
+      CURRENT_BRANCH: ${{ needs.Toolchain.outputs.CURRENT_BRANCH }}
+      SOURCE_REPO: ${{ needs.Toolchain.outputs.SOURCE_REPO }}
+      DEVICE_TARGET: ${{ needs.Toolchain.outputs.DEVICE_TARGET }}
+      DEVICE_SUBTARGET: ${{ needs.Toolchain.outputs.DEVICE_SUBTARGET }}
+      TOOLCHAIN_IMAGE: ${{ needs.Toolchain.outputs.TOOLCHAIN_IMAGE }}
+
+    steps:
+    - name: Check Server Performance
+      run: |
+        echo "警告⚠"
+        echo "分配的服务器性能有限, 若选择的插件过多, 务必注意CPU性能!"
+        echo -e "已知CPU型号(降序): 7763, 8370C, 8272CL, 8171M, E5-2673 \n"
+        echo "--------------------------CPU信息--------------------------"
+        echo "CPU物理数量: $(cat /proc/cpuinfo | grep "physical id" | sort | uniq | wc -l)"
+        echo -e "CPU核心信息: $(cat /proc/cpuinfo | grep name | cut -f2 -d: | uniq -c) \n"
+        echo "--------------------------内存信息--------------------------"
+        echo "已安装内存详细信息："
+        echo -e "$(sudo lshw -short -C memory | grep GiB) \n"
+        echo "--------------------------硬盘信息--------------------------"
+        echo "硬盘数量：$(ls /dev/sd* | grep -v [1-9] | wc -l)" && df -hT
+
+    - name: Initialization Environment
+      env:
+        DEBIAN_FRONTEND: noninteractive
+      run: |
+        docker rmi `docker images -q`
+        sudo rm -rf /etc/apt/sources.list.d/* /usr/share/dotnet /usr/local/lib/android /opt/ghc /etc/mysql /etc/php
+        sudo -E apt-get -y purge azure-cli* docker* ghc* zulu* hhvm* llvm* firefox* google* dotnet* aspnetcore* powershell* openjdk* adoptopenjdk* mysql* php* mongodb* moby* snap* || true
+        sudo -E apt-get -qq update
+        sudo -E apt-get -qq install libfuse-dev $(curl -fsSL git.io/depends-ubuntu-2204)
+        sudo -E apt-get -qq autoremove --purge
+        sudo -E apt-get -qq clean
+        sudo timedatectl set-timezone "$TZ"
+        sudo mkdir -p /workdir
+        sudo chown $USER:$GROUPS /workdir
+
+    - name: Combine Disks
+      run: |
+        sudo swapoff -a && sudo rm -f /mnt/swapfile
+        export ROOT_FREE_KB=$(df --block-size=1024 --output=avail / | tail -1)
+        export ROOT_LOOP_KB=$(expr $ROOT_FREE_KB - 1048576)
+        export ROOT_LOOP_BYTES=$(expr $ROOT_LOOP_KB \* 1024)
+        sudo fallocate -l $ROOT_LOOP_BYTES /root.img
+        export ROOT_LOOP_DEVNAME=$(sudo losetup -Pf --show /root.img)
+        sudo pvcreate -f $ROOT_LOOP_DEVNAME
+        export MNT_FREE_KB=$(df --block-size=1024 --output=avail /mnt | tail -1)
+        export MNT_LOOP_KB=$(expr $MNT_FREE_KB - 102400)
+        export MNT_LOOP_BYTES=$(expr $MNT_LOOP_KB \* 1024)
+        sudo fallocate -l $MNT_LOOP_BYTES /mnt/mnt.img
+        export MNT_LOOP_DEVNAME=$(sudo losetup -Pf --show /mnt/mnt.img)
+        sudo pvcreate -f $MNT_LOOP_DEVNAME
+        sudo vgcreate vgstorage $ROOT_LOOP_DEVNAME $MNT_LOOP_DEVNAME
+        sudo lvcreate -n lvstorage -l 100%FREE vgstorage
+        export LV_DEVNAME=$(sudo lvscan | awk -F "'" '{print $2}')
+        sudo mkfs.btrfs -L combinedisk $LV_DEVNAME
+        sudo mount -o compress=zstd $LV_DEVNAME $GITHUB_WORKSPACE
+        sudo chown -R runner:runner $GITHUB_WORKSPACE
+        mkdir $GITHUB_WORKSPACE/tmp && chmod 777 $GITHUB_WORKSPACE/tmp
+        sudo cp -rp /tmp/* $GITHUB_WORKSPACE/tmp
+        sudo mount -B $GITHUB_WORKSPACE/tmp /tmp && df -hT
+
+    - name: Checkout
+      # DONT USE DEFAULT main BRANCH. Keep to pull same branch as Toolchain 
+      # uses: actions/checkout@main
+      run: |
+        cd $GITHUB_WORKSPACE
+        git init
+        git remote add origin https://github.com/$GITHUB_REPOSITORY
+        git fetch
+        git checkout -t origin/$CURRENT_BRANCH
+    
+    - name: Setup Go version
+      uses: actions/setup-go@v4
+      with:
+        go-version: 'stable'
+
+    - name: Prepare Toolchain Image
+      run: |
+        for i in {0..9}
+        do
+          curl -fsL https://github.com/$GITHUB_REPOSITORY/releases/download/$TOOLCHAIN_TAG/$TOOLCHAIN_IMAGE.img.0$i >> $TOOLCHAIN_IMAGE.img || break
+        done
+        mkdir openwrt-ro openwrt workdir overlay
+        sudo mount -o loop $TOOLCHAIN_IMAGE.img openwrt-ro
+        sudo mount -t overlay overlay -o lowerdir=openwrt-ro,upperdir=overlay,workdir=workdir openwrt
+        cd openwrt
+        git pull
+
+    - name: Load Custom Feeds
+      run: |
+        [ -e $FEEDS_CONF ] && mv $FEEDS_CONF openwrt/feeds.conf.default
+        chmod +x $DIY_P1_SH
+        cd openwrt
+        $GITHUB_WORKSPACE/$DIY_P1_SH
+
+    - name: Install Feeds
+      run: |
+        cd openwrt
+        ./scripts/feeds update -a
+        ./scripts/feeds install -a
+
+    - name: Load Custom Configuration
+      run: |
+        [ -e files ] && mv files openwrt/files
+        [ -e $CONFIG_FILE ] && mv $CONFIG_FILE openwrt/.config
+        chmod +x $DIY_P2_SH
+        cd openwrt
+        $GITHUB_WORKSPACE/$DIY_P2_SH
+
+    - name: SSH connection to Actions
+      uses: P3TERX/ssh2actions@v1.0.0
+      if: (github.event.inputs.ssh == 'true' && github.event.inputs.ssh  != 'false') || contains(github.event.action, 'ssh')
+      env:
+        TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+
+    - name: Download Packages
+      id: package
+      run: |
+        cd openwrt
+        make defconfig
+        make download -j8
+        find dl -size -1024c -exec ls -l {} \;
+        find dl -size -1024c -exec rm -f {} \;
+
+    - name: Compile Packages
+      run: |
+        cd openwrt
+        echo -e "$(nproc) thread compile"
+        make diffconfig
+        make target/compile -j$(nproc) IGNORE_ERRORS="m n" BUILD_LOG=1 || \
+        yes n | make target/compile -j1 V=s IGNORE_ERRORS=1
+        make package/compile -j$(nproc) IGNORE_ERRORS=1 || make package/compile -j1 V=s IGNORE_ERRORS=1
+        make package/index
+
+    - name: Compile The Firmware
+      id: compile
+      run: |
+        cd openwrt
+        make package/install -j$(nproc) || make package/install -j1 V=s
+        make target/install -j$(nproc) || make target/install -j1 V=s
+        echo "status=success" >> $GITHUB_OUTPUT
+        make json_overview_image_info
+        make checksum
+        echo "DATE=$(date +"%Y-%m-%d %H:%M:%S")" >> $GITHUB_ENV
+        echo "FILE_DATE=$(date +"%Y.%m.%d_%H:%M:%S")" >> $GITHUB_ENV
+        grep '^CONFIG_TARGET.*DEVICE.*=y' .config | sed -r 's/.*DEVICE_(.*)=y/\1/' > DEVICE_NAME
+        [ -s DEVICE_NAME ] && echo "DEVICE_NAME=_$(cat DEVICE_NAME)" >> $GITHUB_ENV
+
+    - name: Check Space Usage
+      if: (!cancelled())
+      run: |
+        lsblk -f
+        echo -e "\n"
+        df -hT
+        echo -e "\n"
+
+    - name: Upload Bin Directory
+      uses: actions/upload-artifact@main
+      if: steps.compile.outputs.status == 'success' && env.UPLOAD_BIN_DIR == 'true'
+      with:
+        name: OpenWrt_bin${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
+        path: openwrt/bin
+
+    - name: Organize Files
+      id: organize
+      if: env.UPLOAD_FIRMWARE == 'true' && !cancelled()
+      run: |
+        cd openwrt/bin/targets/*/*
+        cat sha256sums
+        cp $GITHUB_WORKSPACE/openwrt/.config build.config
+        mv -f $GITHUB_WORKSPACE/openwrt/bin/packages/*/*/*.ipk packages
+        tar -zcf Packages.tar.gz packages
+        rm -rf packages feeds.buildinfo version.buildinfo
+        echo "FIRMWARE=$PWD" >> $GITHUB_ENV
+        echo "status=success" >> $GITHUB_OUTPUT
+
+    - name: Upload Firmware To Artifact
+      uses: actions/upload-artifact@main
+      if: steps.organize.outputs.status == 'success' && !cancelled()
+      with:
+        name: OpenWrt_firmware${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
+        path: ${{ env.FIRMWARE }}
+
+    - name: Upload Firmware To CowTransfer
+      id: cowtransfer
+      if: steps.organize.outputs.status == 'success' && env.UPLOAD_COWTRANSFER == 'true' && !cancelled()
+      run: |
+        curl -fsSL git.io/file-transfer | sh
+        ./transfer cow --block 2621440 -s -p 64 --no-progress ${FIRMWARE} 2>&1 | tee cowtransfer.log
+        echo "::warning file=cowtransfer.com::$(cat cowtransfer.log | grep https)"
+        echo "url=$(cat cowtransfer.log | grep https | cut -f3 -d" ")" >> $GITHUB_OUTPUT
+
+    - name: Upload Firmware To WeTransfer
+      id: wetransfer
+      if: steps.organize.outputs.status == 'success' && env.UPLOAD_WETRANSFER == 'true' && !cancelled()
+      run: |
+        curl -fsSL git.io/file-transfer | sh
+        ./transfer wet -s -p 16 --no-progress ${FIRMWARE} 2>&1 | tee wetransfer.log
+        echo "::warning file=wetransfer.com::$(cat wetransfer.log | grep https)"
+        echo "url=$(cat wetransfer.log | grep https | cut -f3 -d" ")" >> $GITHUB_OUTPUT
+
+    - name: Generate Release Tag
+      id: tag
+      if: env.UPLOAD_RELEASE == 'true' && !cancelled()
+      run: |
+        echo "COMMIT_HASH IS ${{ env.COMMIT_HASH }}"
+        echo "release_tag=$(date +"%Y.%m.%d-%H%M")" >> $GITHUB_OUTPUT
+        touch release.txt
+        [ $UPLOAD_COWTRANSFER = true ] && echo "🔗 [Cowtransfer](${{ steps.cowtransfer.outputs.url }})" >> release.txt
+        [ $UPLOAD_WETRANSFER = true ] && echo "🔗 [WeTransfer](${{ steps.wetransfer.outputs.url }})" >> release.txt
+        echo "**This is Lede Firmware for ${{ env.FIRMWARE_TAG }}**" >> release.txt
+        echo "  * 这是 ${{ env.FIRMWARE_TAG }} 平台使用的 Lede 固件" >> release.txt
+        echo "  默认 IP: 192.168.1.254 默认密码: password" >> release.txt
+        echo "  当前使用版本:【编译前的最后一次[➦主源码](https://github.com/coolsnowwolf/lede/commit/${{ env.COMMIT_HASH }})更新记录】" >> release.txt
+        echo "  ${{ env.VERSION_INFO }}" >> release.txt
+        echo "status=success" >> $GITHUB_OUTPUT
+
+    - name: Upload Firmware To Release
+      uses: softprops/action-gh-release@v1
+      if: steps.tag.outputs.status == 'success' && !cancelled()
+      env:
+        GITHUB_TOKEN: ${{ secrets.ACCESS_TOKEN }}
+      with:
+        tag_name: ${{ steps.tag.outputs.release_tag }}
+        body_path: release.txt
+        files: ${{ env.FIRMWARE }}/*
+
+    - name: Delete Workflow Runs
+      uses: GitRML/delete-workflow-runs@main
+      with:
+        retain_days: 1
+        keep_minimum_runs: 3
+
+    - name: Remove Old Releases
+      uses: dev-drprasad/delete-older-releases@v0.3.1
+      if: env.UPLOAD_RELEASE == 'true' && !cancelled()
+      with:
+        keep_latest: 3
+        delete_tags: true
+      env:
+        GITHUB_TOKEN: ${{ secrets.ACCESS_TOKEN }}

@@ -32,5 +32,5 @@ sed -i "s/OpenWrt /Lorchr build $(TZ=UTC-8 date "+%Y.%m.%d") @ OpenWrt /g" packa
 
 # Add kernel build domain
 [ -z $(grep "CONFIG_KERNEL_BUILD_DOMAIN=" .config) ] &&
-    echo 'CONFIG_KERNEL_BUILD_DOMAIN="GitHub Actions"' >>.config ||
-    sed -i 's@\(CONFIG_KERNEL_BUILD_DOMAIN=\).*@\1$"GitHub Actions"@' .config
+    echo 'CONFIG_KERNEL_BUILD_DOMAIN="github.com"' >>.config ||
+    sed -i 's@\(CONFIG_KERNEL_BUILD_DOMAIN=\).*@\1$"github.com"@' .config

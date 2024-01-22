@@ -27,13 +27,14 @@ on:
         required: false
         default: 'x86_64'
       architecture:
-        description: 'Build architecture ["x86_64"]'
+        description: 'Build architecture ["x86_64", "x86_64-test"]'
         required: true
         default: 'x86_64'
         type: choice
         options:
           - "ALL"
           - x86_64
+          - x86_64-test
 #   schedule:
 #     - cron: 0 0 2 * *
 

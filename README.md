@@ -57,5 +57,9 @@ A template for building OpenWrt with GitHub Actions
 - [AUK9527/Are-u-ok](https://github.com/AUK9527/Are-u-ok)
 - [iStore IPKs](https://istore.linkease.com/repo/all/store/)
 - [openwrt-app-actions](https://github.com/linkease/openwrt-app-actions)
+- [openwrt.io](https://github.com/kiddin9/OpenWrt_x86-r2s-r4s-r5s-N1)
+- [KFERMercer/OpenWrt-CI](https://github.com/KFERMercer/OpenWrt-CI)
+- [tangtao-xp1/lede](https://github.com/tangtao-xp1/lede/blob/master/.github/workflows/openwrt-ci.yml)
+- [smallprogram/OpenWrtAction](https://github.com/smallprogram/OpenWrtAction)
 
 Firmwares compiled from [Lean's OpenWrt](https://github.com/coolsnowwolf/lede) source code —— Adapted to X86, R2C, R2S, R4S, R4SE, R5C, R5S, OrangePi R1 Plus, RaspberryPi 3B/3B+/4B, R66S, R68S, M68S, H66K, H68K, H69K, E25, N1, S905x3, S922x, HK1, X96 max, 微加云, 贝壳云, 我家云, 章鱼星球, etc.

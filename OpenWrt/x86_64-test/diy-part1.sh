@@ -21,11 +21,11 @@ sed -i '$a src-git passwall_packages https://github.com/xiaorouji/openwrt-passwa
 sed -i '$a src-git haiibo https://github.com/haiibo/openwrt-packages' feeds.conf.default
 sed -i '$a src-git kiddin9 https://github.com/kiddin9/openwrt-packages' feeds.conf.default
 
-echo 'src-git helloworld https://github.com/fw876/helloworld' >> feeds.conf.default
-echo 'src-git passwall https://github.com/xiaorouji/openwrt-passwall' >> feeds.conf.default
-echo 'src-git passwall2 https://github.com/xiaorouji/openwrt-passwall2.git;main' >> feeds.conf.default
-echo 'src-git openclash https://github.com/vernesong/OpenClash' >> feeds.conf.default
-echo 'src-git ssrplus https://github.com/maxlicheng/luci-app-ssr-plus' >> feeds.conf.default
+# echo 'src-git helloworld https://github.com/fw876/helloworld' >> feeds.conf.default
+# echo 'src-git passwall https://github.com/xiaorouji/openwrt-passwall' >> feeds.conf.default
+# echo 'src-git passwall2 https://github.com/xiaorouji/openwrt-passwall2.git;main' >> feeds.conf.default
+# echo 'src-git openclash https://github.com/vernesong/OpenClash' >> feeds.conf.default
+# echo 'src-git ssrplus https://github.com/maxlicheng/luci-app-ssr-plus' >> feeds.conf.default
 
 # Themes
 git clone --depth=1 https://github.com/derisamedia/luci-theme-alpha package/luci-theme-alpha

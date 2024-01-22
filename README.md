@@ -52,6 +52,8 @@ A template for building OpenWrt with GitHub Actions
 - [jjm2473/istoreos-intl-builder](https://github.com/jjm2473/istoreos-intl-builder)
 - [SuLingGG/OpenWrt-Rpi](https://github.com/SuLingGG/OpenWrt-Rpi)
 - [chenmozhijin/OpenWrt-K](https://github.com/chenmozhijin/OpenWrt-K)
+- [Openwrt-AIO](https://github.com/Chikage0o0/Openwrt-AIO)
+- [lede-dockercompiler](https://github.com/jandelgado/lede-dockercompiler)
 - [AUK9527/Are-u-ok](https://github.com/AUK9527/Are-u-ok)
 - [iStore IPKs](https://istore.linkease.com/repo/all/store/)
 - [openwrt-app-actions](https://github.com/linkease/openwrt-app-actions)

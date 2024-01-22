@@ -17,7 +17,8 @@ sed -i 's/192.168.1.1/192.168.1.254/g' package/base-files/files/bin/config_gener
 # sed -i 's/OpenWrt/OpenWrt/g' package/base-files/files/bin/config_generate
 
 # Modify the version number
-sed -i "s/OpenWrt /Lorchr build $(TZ=UTC-8 date "+%Y.%m.%d") @ OpenWrt /g" package/base-files/files/etc/sysctl.conf
+sed -i "s/OpenWrt /OpenWrt @ Build By Lorchr $(TZ=UTC-8 date "+%Y.%m.%d")/g" package/base-files/files/etc/sysctl.conf
+
 # Modify default theme
 # sed -i 's/luci-theme-bootstrap/luci-theme-argon/g' feeds/luci/collections/luci/Makefile
 

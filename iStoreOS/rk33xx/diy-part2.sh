@@ -17,7 +17,7 @@ sed -i 's/192.168.1.1/192.168.1.254/g' package/base-files/files/bin/config_gener
 # sed -i 's/OpenWrt/iStoreOS/g' package/base-files/files/bin/config_generate
 
 # Modify the version number
-sed -i "s/OpenWrt /Lorchr build $(TZ=UTC-8 date "+%Y.%m.%d") @ iStoreOS /g" package/lean/default-settings/files/zzz-default-settings
+# sed -i "s/iStoreOS/Lorchr build $(TZ=UTC-8 date "+%Y.%m.%d") @ iStoreOS /g" / package/istoreos-files/files/etc/board.d/10_system
 
 # Modify default theme
 # sed -i 's/luci-theme-bootstrap/luci-theme-argon/g' feeds/luci/collections/luci/Makefile
@@ -32,8 +32,8 @@ sed -i "s/OpenWrt /Lorchr build $(TZ=UTC-8 date "+%Y.%m.%d") @ iStoreOS /g" pack
 
 # Add kernel build domain
 [ -z $(grep "CONFIG_KERNEL_BUILD_DOMAIN=" .config) ] &&
-    echo 'CONFIG_KERNEL_BUILD_DOMAIN="GitHub Actions"' >>.config ||
-    sed -i 's@\(CONFIG_KERNEL_BUILD_DOMAIN=\).*@\1$"GitHub Actions"@' .config
+    echo 'CONFIG_KERNEL_BUILD_DOMAIN="github.com"' >>.config ||
+    sed -i 's@\(CONFIG_KERNEL_BUILD_DOMAIN=\).*@\1$"github.com"@' .config
 
 # Auto login ttyd
 # sed -i "s?/bin/login?/usr/libexec/login.sh?g" ${GITHUB_WORKSPACE}/openwrt/package/feeds/packages/ttyd/files/ttyd.config
